@@ -59,7 +59,6 @@ struct ifx_cat1_uart_config {
 	struct uart_config dt_cfg;
 	uint16_t irq_num;
 	uint8_t irq_priority;
-	void (*irq_config_func)(const struct device *dev);
 };
 
 typedef void (*ifx_cat1_uart_event_callback_t)(void *callback_arg);
@@ -162,17 +161,17 @@ cy_rslt_t ifx_cat1_uart_set_baud(const struct device *dev, uint32_t baudrate)
 	struct ifx_cat1_uart_data *data = dev->data;
 	const struct ifx_cat1_uart_config *const config = dev->config;
 
-	if (data->baud_rate != baudrate) {
-		data->baud_rate = baudrate;
-	}
-
-	Cy_SCB_UART_Disable(config->reg_addr, NULL);
-
 	uint8_t best_oversample = IFX_CAT1_UART_OVERSAMPLE_MIN;
 	uint8_t best_difference = 0xFF;
 	uint32_t divider;
 
 	uint32_t peri_frequency;
+
+	if (data->baud_rate != baudrate) {
+		data->baud_rate = baudrate;
+	}
+
+	Cy_SCB_UART_Disable(config->reg_addr, NULL);
 
 #if defined(COMPONENT_CAT1A)
 	peri_frequency = Cy_SysClk_ClkPeriGetFrequency();
@@ -374,16 +373,20 @@ void ifx_cat1_uart_enable_event(const struct device *dev, uint32_t event, bool e
 	struct ifx_cat1_uart_data *const data = dev->data;
 	const struct ifx_cat1_uart_config *const config = dev->config;
 
+	uint32_t tx_mask = 0x0;
+	uint32_t rx_mask = 0x0;
+
+	uint32_t current_tx_mask = Cy_SCB_GetTxInterruptMask(config->reg_addr);
+	uint32_t current_rx_mask = Cy_SCB_GetRxInterruptMask(config->reg_addr);
+
 	irq_disable(config->irq_num);
 
 	NVIC_ClearPendingIRQ(config->irq_num);
 
-	uint32_t tx_mask = 0x0;
-	uint32_t rx_mask = 0x0;
-
 	if (event & CY_SCB_UART_TRANSMIT_EMTPY) {
 		tx_mask |= CY_SCB_UART_TX_EMPTY;
 	}
+
 	if (event & CY_SCB_UART_TRANSMIT_ERR_EVENT) {
 		/* Omit underflow condition as the interrupt perpetually triggers
 		 * Standard mode only uses OVERFLOW irq
@@ -410,9 +413,6 @@ void ifx_cat1_uart_enable_event(const struct device *dev, uint32_t event, bool e
 		/* Omit underflow condition as the interrupt perpetually triggers. */
 		rx_mask |= CY_SCB_UART_RECEIVE_ERR;
 	}
-
-	uint32_t current_tx_mask = Cy_SCB_GetTxInterruptMask(config->reg_addr);
-	uint32_t current_rx_mask = Cy_SCB_GetRxInterruptMask(config->reg_addr);
 
 	if (enable && tx_mask) {
 		Cy_SCB_ClearTxInterrupt(config->reg_addr, tx_mask);
@@ -539,6 +539,7 @@ static void ifx_cat1_uart_irq_callback_set(const struct device *dev,
 
 static void ifx_cat1_uart_irq_handler(const struct device *dev)
 {
+	// aditi todo
 	/*
 	 * This function clears the interrupt and makes a callback.
 	 * It does not handle events.
@@ -548,18 +549,20 @@ static void ifx_cat1_uart_irq_handler(const struct device *dev)
 	/* Clear interrupt */
 	CySCB_Type *base = config->reg_addr;
 	uint32_t locRxErr = (CY_SCB_UART_RECEIVE_ERR & Cy_SCB_GetRxInterruptStatusMasked(base));
-	uint32_t rx_clear = locRxErr | CY_SCB_RX_INTR_UART_BREAK_DETECT | CY_SCB_RX_INTR_LEVEL |
-			    CY_SCB_RX_INTR_NOT_EMPTY;
-	Cy_SCB_ClearRxInterrupt(base, rx_clear);
+	// uint32_t rx_clear = locRxErr | CY_SCB_RX_INTR_UART_BREAK_DETECT | CY_SCB_RX_INTR_LEVEL |
+			//     CY_SCB_RX_INTR_NOT_EMPTY;
+	Cy_SCB_ClearRxInterrupt(base, locRxErr);
+
 	uint32_t locTxErr = (CY_SCB_UART_TRANSMIT_ERR & Cy_SCB_GetTxInterruptStatusMasked(base));
-	uint32_t tx_clear =
-		locTxErr | CY_SCB_TX_INTR_LEVEL | CY_SCB_TX_INTR_UART_DONE | CY_SCB_UART_TX_EMPTY;
-	Cy_SCB_ClearTxInterrupt(base, tx_clear);
+	// uint32_t tx_clear =
+		// locTxErr | CY_SCB_TX_INTR_LEVEL | CY_SCB_TX_INTR_UART_DONE | CY_SCB_UART_TX_EMPTY;
+	Cy_SCB_ClearTxInterrupt(base, locTxErr);
 
 	/* Call the callback with the callback data.
 	 * This does not guarantee a separate callback per event.
 	 */
 	struct ifx_cat1_uart_data *const data = dev->data;
+
 	if (data->irq_cb != NULL) {
 		data->irq_cb(dev, data->irq_cb_data);
 	}
